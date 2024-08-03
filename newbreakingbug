@@ -1,0 +1,177 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+from yellowbrick.cluster import KElbowVisualizer
+from matplotlib.colors import ListedColormap
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
+from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, mean_absolute_error, mean_squared_error, r2_score
+import warnings
+warnings.filterwarnings('ignore')
+
+df = pd.read_csv("/kaggle/input/heart-disease-data/heart_disease_uci.csv")
+
+print(df.head())
+df.info()
+print(df.shape)
+print(f"ID min: {df['id'].min()}, ID max: {df['id'].max()}")
+print(f"Age min: {df['age'].min()}, Age max: {df['age'].max()}")
+print(df['age'].describe())
+
+custom_colors = ["#FF5733", "#3366FF", "#33FF57"] 
+sns.histplot(df['age'], kde=True, color="#FF5733", palette=custom_colors)
+plt.show()
+sns.histplot(df['age'], kde=True)
+plt.axvline(df['age'].mean(), color='Red', label='Mean')
+plt.axvline(df['age'].median(), color='Green', label='Median')
+plt.axvline(df['age'].mode()[0], color='Blue', label='Mode')
+plt.legend()
+plt.show()
+
+print('Mean:', df['age'].mean())
+print('Median:', df['age'].median())
+print('Mode:', df['age'].mode()[0])
+
+fig = px.histogram(data_frame=df, x='age', color='sex')
+fig.show()
+
+print(df['sex'].value_counts())
+male_count = df['sex'].value_counts()[1]
+female_count = df['sex'].value_counts()[0]
+total_count = male_count + female_count
+male_percentage = (male_count / total_count) * 100
+female_percentage = (female_count / total_count) * 100
+print(f'Male percentage in the data: {male_percentage:.2f}%')
+print(f'Female percentage in the data: {female_percentage:.2f}%')
+difference_percentage = ((male_count - female_count) / female_count) * 100
+print(f'Males are {difference_percentage:.2f}% more than females in the data.')
+
+print(df.groupby('sex')['age'].value_counts())
+print(df['dataset'].value_counts())
+fig = px.bar(df, x='dataset', color='sex')
+fig.show()
+print(df.groupby('sex')['dataset'].value_counts())
+fig = px.histogram(data_frame=df, x='age', color='dataset')
+fig.show()
+
+print("_")
+print("Mean of the dataset: ", df.groupby('dataset')['age'].mean())
+print("_")
+print("Median of the dataset: ", df.groupby('dataset')['age'].median())
+print("_")
+print("Mode of the dataset: ", df.groupby('dataset')['age'].agg(lambda x: pd.Series.mode(x)[0]))
+print("_")
+
+print(df['cp'].value_counts())
+sns.countplot(data=df, x='cp', hue='sex')
+plt.show()
+sns.countplot(data=df, x='cp', hue='dataset')
+plt.show()
+fig = px.histogram(data_frame=df, x='age', color='cp')
+fig.show()
+
+print(df['trestbps'].describe())
+print(f"Percentage of missing values in trestbps column: {df['trestbps'].isnull().sum() / len(df) * 100:.2f}%")
+
+imputer1 = IterativeImputer(max_iter=10, random_state=42)
+imputer1.fit(df[['trestbps']])
+df['trestbps'] = imputer1.transform(df[['trestbps']])
+print(f"Missing values in trestbps column: {df['trestbps'].isnull().sum()}")
+df.info()
+print((df.isnull().sum() / len(df) * 100).sort_values(ascending=False))
+imputer2 = IterativeImputer(max_iter=10, random_state=42)
+df['ca'] = imputer2.fit_transform(df[['ca']])
+df['oldpeak'] = imputer2.fit_transform(df[['oldpeak']])
+df['chol'] = imputer2.fit_transform(df[['chol']])
+df['thalach'] = imputer2.fit_transform(df[['thalach']])
+df['thal'] = imputer2.fit_transform(df[['thal']])
+print((df.isnull().sum() / len(df) * 100).sort_values(ascending=False))
+print(df.isnull().sum().values)
+missing_data_cols = df.isnull().sum()[df.isnull().sum() > 0].index.tolist()
+print(missing_data_cols)
+
+cat_cols = df.select_dtypes(include='object').columns.tolist()
+print(cat_cols)
+num_cols = df.select_dtypes(exclude='object').columns.tolist()
+print(num_cols)
+print(f'Categorical Columns: {cat_cols}')
+print(f'Numerical Columns: {num_cols}')
+
+categorical_cols = ['thal', 'ca', 'slope', 'exang', 'restecg', 'chol', 'trestbps', 'sex', 'cp', 'fbs']
+bool_cols = ['fbs']
+numerical_cols = ['oldpeak', 'age', 'thalach']
+
+def impute_categorical_missing_data(passed_col):
+    df_null = df[df[passed_col].isnull()]
+    df_not_null = df[df[passed_col].notnull()]
+    X = df_not_null.drop(passed_col, axis=1)
+    y = df_not_null[passed_col]
+    other_missing_cols = [col for col in missing_data_cols if col != passed_col]
+    label_encoder = LabelEncoder()
+    if y.dtype == 'object' or passed_col in bool_cols:
+        y = label_encoder.fit_transform(y)
+    for col in other_missing_cols:
+        if df[col].dtype == 'object':
+            df[col] = label_encoder.fit_transform(df[col])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    rf_classifier = RandomForestClassifier()
+    rf_classifier.fit(X_train, y_train)
+    y_pred = rf_classifier.predict(X_test)
+    acc_score = accuracy_score(y_test, y_pred)
+    print(f"The feature '{passed_col}' imputation accuracy is: {acc_score * 100:.2f}%")
+    predicted_values = rf_classifier.predict(df_null.drop(passed_col, axis=1))
+    df.loc[df[passed_col].isnull(), passed_col] = predicted_values
+    return df[passed_col]
+
+for col in categorical_cols:
+    impute_categorical_missing_data(col)
+
+print(df.isnull().sum().values)
+print(df.columns)
+
+df.drop(columns=['id'], inplace=True)
+print(df.columns)
+print(df.head())
+
+X = df.drop(columns='target')
+y = df['target']
+label_encoder = LabelEncoder()
+for col in X.columns:
+    if X[col].dtype == 'object' or col in categorical_cols:
+        X[col] = label_encoder.fit_transform(X[col].astype(str))
+scaler = StandardScaler()
+X[numerical_cols] = scaler.fit_transform(X[numerical_cols])
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+models = {
+    "Logistic Regression": LogisticRegression(),
+    "K-Nearest Neighbors": KNeighborsClassifier(),
+    "Support Vector Machine": SVC(),
+    "Decision Tree": DecisionTreeClassifier(),
+    "Random Forest": RandomForestClassifier(),
+    "AdaBoost": AdaBoostClassifier(),
+    "Gradient Boosting": GradientBoostingClassifier(),
+    "XGBoost": XGBClassifier(),
+    "LightGBM": LGBMClassifier(),
+    "Naive Bayes": GaussianNB()
+}
+
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f'{name} Accuracy: {accuracy * 100:.2f}%')
+    print(confusion_matrix(y_test, y_pred))
+    print(classification_report(y_test, y_pred))
